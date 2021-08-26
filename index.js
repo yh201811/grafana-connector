@@ -14,16 +14,16 @@ function* cartesian(args) {
       yield [h, ...r];
 }
 
-const htmlDecode = function(str) {
+const htmlDecode = function (str) {
   const map = {
-    '&amp;' :   '&',
-    '&gt;'  :   '>',
-    '&lt;'  :   '<',
-    '&quot;':   '"',
-    '&#39;' :   "'"
+    '&amp;': '&',
+    '&gt;': '>',
+    '&lt;': '<',
+    '&quot;': '"',
+    '&#39;': "'"
   };
   const re = new RegExp('(' + Object.keys(map).join('|') + '|&#[0-9]{1,5};|&#x[0-9a-fA-F]{1,4};' + ')', 'g');
-  return String(str).replace(re, function(match, capture) {
+  return String(str).replace(re, function (match, capture) {
     return (capture in map) ? map[capture] :
       capture[2] === 'x' ?
         String.fromCharCode(parseInt(capture.substr(3), 16)) :
@@ -72,7 +72,7 @@ const ATTRIBUTE_NAME = RegExp("^[a-zA-Z][a-zA-Z0-9_]*$");
 const cfg = context.configuration;
 const TARGETS = {};
 
-const parse_variable = function(d) {
+const parse_variable = function (d) {
   let values = _.map(_.split(d, ","), str => str.trim());
 
   if (values.length === 0) {
@@ -84,6 +84,8 @@ const parse_variable = function(d) {
 
 const hideEmpty = cfg['hideEmpty']
 const logQuery = cfg['logQuery']
+//new add
+var collectionCheck = true
 
 let agg = cfg['aggregation'];
 agg = agg ? agg.toUpperCase(agg) : null;
@@ -93,8 +95,8 @@ if (AGGREGATIONS_ALIASES[agg]) {
 }
 
 const aggregations = (agg && agg !== '*')
-      ? parse_variable(agg)
-      : AGGREGATIONS;
+  ? parse_variable(agg)
+  : AGGREGATIONS;
 
 {
   const target = cfg['target'];
@@ -109,17 +111,22 @@ const aggregations = (agg && agg !== '*')
     const t = Mustache.render(target, view);
 
     let { filterExpression,
-          dateName, dateField,
-          valueName, valueField,
-          alias } = cfg;
+      dateName, dateField,
+      valueName, valueField,
+      alias } = cfg;
 
     const collectionName = Mustache.render(collection, view);
-    const c = db._collection(collectionName);
+    // new add
+    // const c = db._collection(collectionName);
+    var c = db._collection(collectionName);
 
     if (!c) {
-      throw new Error(
-        `Invalid service configuration. Unknown collection: ${collectionName}`
-      );
+      // new add
+      // throw new Error(
+      //   `Invalid service configuration. Unknown collection: ${collectionName}`
+      // );
+      c = collection
+      collectionCheck = false
     }
 
     TARGETS[t] = {
@@ -183,7 +190,7 @@ router
         }
       }
     }
-    
+
     res.json(TARGET_KEYS);
   })
   .summary("List the available metrics")
@@ -192,15 +199,22 @@ router
     "are available to the data source."
   );
 
-const seriesQuery = function(definition, vars, start, end, interval, isTable) {
+const seriesQuery = function (definition, vars, start, end, interval, isTable) {
   const agg = definition.aggregation && definition.aggregation !== "NONE"
-        ? aql.literal(definition.aggregation)
-        : null;
-  const { collection } = definition;
+    ? aql.literal(definition.aggregation)
+    : null;
+  // const { collection } = definition;
+  // new add
+  let { collection } = definition;
+  if (!collectionCheck) {
+    collection = aql.literal(collection
+      ? `${collection}`
+      : "");
+  }
 
   let { filterExpression,
-        dateName, dateField,
-        valueName, valueField } = definition;
+    dateName, dateField,
+    valueName, valueField } = definition;
 
   filterExpression = filterExpression ? Mustache.render(filterExpression, vars) : undefined;
 
@@ -272,35 +286,62 @@ router
     const start = Number(new Date(body.range.from));
     const end = Number(new Date(body.range.to));
     const response = [];
-    const unravel = function() { return [].slice.call(arguments); };
+    const unravel = function () { return [].slice.call(arguments); };
 
     const grafana = {};
     let multiKeys = [];
     let multiValues = [];
 
+    // new
+    console.log("scopedVars '" + JSON.stringify(body.scopedVars) + "'");
+    console.log("targets '" + JSON.stringify(body.targets) + "'");
+
     if (cfg['multiValueTemplateVariables']) {
       let d = cfg['multiValueTemplateVariables'];
       multiKeys = _.map(_.split(d, ","), str => str.trim());
+
+      console.log("input multiValueTemplateVariables '" + d + "'");
     }
 
     for (let key of multiKeys) {
+      // new add
+      console.log("key '" + key + "'");
       if (key in body.scopedVars) {
         let value = body.scopedVars[key].value;
 
-	if (!Array.isArray(value)) {
-	   value = [value];
-	}
+        if (!Array.isArray(value)) {
+          value = [value];
+        }
 
-	let l = [];
+        let l = [];
 
-	for (let v of value) {
-  	  let obj = {};
+        for (let v of value) {
+          let obj = {};
           obj[key] = htmlDecode(v);
-	  l.push(obj);
-	}
+          l.push(obj);
+        }
 
-	multiValues.push(l);
+        multiValues.push(l);
       }
+      // new add
+      else {
+        const tv = cfg['templateVariables'];
+
+        if (tv[key]) {
+          const value = db._query(tv[key]).toArray();
+          console.log("search result '" + value + "'");
+          let l = [];
+
+          for (let v of value) {
+            let obj = {};
+            obj[key] = htmlDecode(v);
+            l.push(obj);
+          }
+
+          multiValues.push(l);
+        }
+      }
+      // end
     }
 
     if (multiValues.length > 0) {
@@ -319,7 +360,7 @@ router
         }
       }
     }
-          
+
     for (let mv of multiValues) {
       for (let { target, type, data } of body.targets) {
         let original = target;
@@ -330,7 +371,7 @@ router
         }
 
         const definition = _.merge({}, targetDef);
-        const vars = _.assign({grafana}, definition.view, data);
+        const vars = _.assign({ grafana }, definition.view, data);
 
         for (let m of mv) {
           if (logQuery) {
@@ -341,17 +382,33 @@ router
         }
 
         if (targetDef.alias) {
-           target = Mustache.render(targetDef.alias, vars);
+          target = Mustache.render(targetDef.alias, vars);
         }
 
         if (data && data.alias) {
           target = Mustache.render(data.alias, vars);
         }
 
+        // new add
+        if (!collectionCheck) {
+          definition.collection = Mustache.render(definition.collection, vars);
+          let c1 = db._collection(definition.collection);
+          if (!c1) {
+            throw new Error(
+              `Invalid service configuration. Unknown collection: ${definition.collection}`
+            );
+          }
+        }
+
+        console.log("targetDef '" + JSON.stringify(targetDef) + "'");
+        console.log("vars '" + JSON.stringify(vars) + "'");
+        console.log("definition '" + JSON.stringify(definition) + "'");
+        console.log("target 1 '" + target + "'");
+
         const isTable = (type === "table");
         const datapoints = definition ?
-              seriesQuery(definition, vars, start, end, interval, isTable) :
-              [];
+          seriesQuery(definition, vars, start, end, interval, isTable) :
+          [];
 
         if (datapoints.length > 0 || !hideEmpty) {
           if (isTable) {
