@@ -49,11 +49,12 @@ and then navigate to the _Settings_ tab in the top bar.
 
 - **target**:
   Name of the target as shown in the Grafana Metric field. Please note that the name can contain
-  template variables.
+  template variables(without brace, e.g., grafana.name), or a comma-separated list.
 
 - **alias**:
   Name of the target as shown in the Grafana graph. Please note that the name can contain template
-  variables.
+  variables. 
+  Notice that not fill this section can get the detailed target(constructed by current execution's used MultipleTemplateVariables) name from grafana query response.
 
 - **collection**:
   Name of the collection. Please note that the name can contain template variables.
