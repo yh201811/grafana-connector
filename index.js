@@ -116,15 +116,11 @@ const aggregations = (agg && agg !== '*')
       alias } = cfg;
 
     const collectionName = Mustache.render(collection, view);
-    // new add
-    // const c = db._collection(collectionName);
+    
+    // Make MultipleTemplateVariables can be used in collection section.
     var c = db._collection(collectionName);
 
     if (!c) {
-      // new add
-      // throw new Error(
-      //   `Invalid service configuration. Unknown collection: ${collectionName}`
-      // );
       c = collection
       collectionCheck = false
     }
@@ -203,8 +199,7 @@ const seriesQuery = function (definition, vars, start, end, interval, isTable) {
   const agg = definition.aggregation && definition.aggregation !== "NONE"
     ? aql.literal(definition.aggregation)
     : null;
-  // const { collection } = definition;
-  // new add
+  // Using MultipleTemplateVariables for collection
   let { collection } = definition;
   if (!collectionCheck) {
     collection = aql.literal(collection
@@ -292,20 +287,17 @@ router
     let multiKeys = [];
     let multiValues = [];
 
-    // new
-    console.log("scopedVars '" + JSON.stringify(body.scopedVars) + "'");
-    console.log("targets '" + JSON.stringify(body.targets) + "'");
+    // Logging targets in request 
+    if (logQuery) {
+      console.log("targets '" + JSON.stringify(body.targets) + "'");
+    }
 
     if (cfg['multiValueTemplateVariables']) {
       let d = cfg['multiValueTemplateVariables'];
       multiKeys = _.map(_.split(d, ","), str => str.trim());
-
-      console.log("input multiValueTemplateVariables '" + d + "'");
     }
 
     for (let key of multiKeys) {
-      // new add
-      console.log("key '" + key + "'");
       if (key in body.scopedVars) {
         let value = body.scopedVars[key].value;
 
@@ -323,13 +315,12 @@ router
 
         multiValues.push(l);
       }
-      // new add
+      // Making MultipleTemplateVariables can be used by different sections by adding values to MultipleTemplateVariables through AQL
       else {
         const tv = cfg['templateVariables'];
 
         if (tv[key]) {
           const value = db._query(tv[key]).toArray();
-          console.log("search result '" + value + "'");
           let l = [];
 
           for (let v of value) {
@@ -341,7 +332,6 @@ router
           multiValues.push(l);
         }
       }
-      // end
     }
 
     if (multiValues.length > 0) {
@@ -361,17 +351,25 @@ router
       }
     }
 
+    // Logging values of MultipleTemplateVariables
+    if (logQuery) {
+      console.log("MultipleTemplateVariables '" + JSON.stringify(multiValues) + "'");
+    }
     for (let mv of multiValues) {
+      // Logging current used multiValues
       for (let { target, type, data } of body.targets) {
         let original = target;
-        const targetDef = TARGETS[original];
-
-        if (!targetDef) {
-          throw Error(`unknown target ${original}`);
+        
+        // Create target array if passed target is a multiple selected grafana variables.
+        let originals = [];
+        if (original.startsWith("(") && original.endsWith(")")) {
+          originals = _.map(_.split(original.replace("(", "").replace(")", ""), "|"), str => str.trim());
+        }
+        else {
+          originals = [original]
         }
 
-        const definition = _.merge({}, targetDef);
-        const vars = _.assign({ grafana }, definition.view, data);
+        let vars = _.assign({ grafana }, {"aggregation": "NONE"}, data);
 
         for (let m of mv) {
           if (logQuery) {
@@ -381,15 +379,67 @@ router
           vars.grafana = _.assign(vars.grafana, m);
         }
 
+        // Make MultipleTemplateVariables can be used in target section
+        let continueFlag = false
+        let targetDef = {}
+
+        for (let orig of originals) {
+          targetDef = TARGETS[orig];
+          for (let t of Object.keys(TARGETS)) {
+            let tVar = Mustache.render("{{" + t + "}}", vars);
+            if (t.includes(orig) || (tVar == orig)) {
+              targetDef = TARGETS[t];
+              targetDef["target"] = orig;
+  
+              for (let m of mv) {
+                if (orig == Object.values(m)) {
+                  continueFlag = true;
+                  if (logQuery) {
+                    console.log("target '" + orig + "'");
+                  }
+                  break;
+                }
+              }
+  
+              break;
+            }
+          }
+
+          if (continueFlag) {
+            break;
+          }
+        }   
+
+        // if (!targetDef) {
+        //   throw Error(`unknown target ${original}`);
+        // }
+
+        if (!continueFlag) {
+          if (logQuery) {
+            console.log("current multi-value vars do not match current target.");
+          }
+          continue;
+        }
+
+        const definition = _.merge({}, targetDef);
+        vars.aggregation = definition.view.aggregation;
+
         if (targetDef.alias) {
           target = Mustache.render(targetDef.alias, vars);
+        }
+        // create different target names in response with current MultipleTemplateVariables
+        else {
+          target = "";
+          for (let m of mv) {
+            target += "{" + Object.values(m) + "}";
+          }
         }
 
         if (data && data.alias) {
           target = Mustache.render(data.alias, vars);
         }
 
-        // new add
+        // Using MultipleTemplateVariables for collection
         if (!collectionCheck) {
           definition.collection = Mustache.render(definition.collection, vars);
           let c1 = db._collection(definition.collection);
@@ -399,11 +449,6 @@ router
             );
           }
         }
-
-        console.log("targetDef '" + JSON.stringify(targetDef) + "'");
-        console.log("vars '" + JSON.stringify(vars) + "'");
-        console.log("definition '" + JSON.stringify(definition) + "'");
-        console.log("target 1 '" + target + "'");
 
         const isTable = (type === "table");
         const datapoints = definition ?
