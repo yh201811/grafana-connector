@@ -362,11 +362,13 @@ router
         
         // Create target array if passed target is a multiple selected grafana variables.
         let originals = [];
-        if (original.startsWith("(") && original.endsWith(")")) {
-          originals = _.map(_.split(original.replace("(", "").replace(")", ""), "|"), str => str.trim());
+        var regex1 = /^\((.*\|.*)\)$/g;
+        var regex2 = /\\/g;
+        if (original.match(regex1)) {
+          originals = _.map(_.split(original.replace(regex2, "").replace("(", "").replace(")", ""), "|"), str => str.trim());
         }
         else {
-          originals = [original]
+          originals = [original.replace(regex2, "")]
         }
 
         let vars = _.assign({ grafana }, {"aggregation": "NONE"}, data);
